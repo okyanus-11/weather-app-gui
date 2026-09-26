@@ -66,8 +66,8 @@ class WeatherApp(tk.Tk):
         entry.pack(side="left", fill="x", expand=True, ipady=10)
         ttk.Button(controls, text="Search", style="Search.TButton", command=self.show_weather).pack(side="left", padx=(10, 0))
 
-        switch = tk.Frame(self, bg="#101827", padx=32, pady=(12, 18))
-        switch.pack(fill="x")
+        switch = tk.Frame(self, bg="#101827", padx=32)
+        switch.pack(fill="x", pady=(12, 18))
         for label, value in (("°C", "metric"), ("°F", "imperial")):
             tk.Radiobutton(switch, text=label, variable=self.units, value=value, command=self.show_weather, font=("Segoe UI", 10), fg="#d9e7f7", bg="#101827", selectcolor="#24415c", activebackground="#101827", activeforeground="#ffffff").pack(side="left", padx=(0, 12))
 
