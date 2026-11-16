@@ -29,4 +29,4 @@ python weather_gui.py
 
 ## Installation
 
-For prerequisites, environment setup, configuration, and run/build commands, see the [installation guide](INSTALLATION.md).
+Requires Python 3.10+, Tkinter and an OpenWeatherMap API key. Clone the repository, create a virtual environment, install `requirements.txt`, copy `.env.example` to `.env`, and set `WEATHER_API_KEY`. Launch with `python weather_gui.py`. Linux users may need to install their distribution's Tkinter package. See the [full installation guide](INSTALLATION.md).
