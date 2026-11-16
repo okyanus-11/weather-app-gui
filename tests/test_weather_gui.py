@@ -22,3 +22,18 @@ def test_modern_palettes_have_complete_semantic_roles() -> None:
     for palette in THEMES.values():
         assert required <= palette.keys()
         assert all(len(palette[key]) == 7 for key in required)
+
+
+
+def test_accent_button_text_uses_readable_contrast() -> None:
+    from weather_gui import _accent_foreground
+
+    assert _accent_foreground("#326fd1") == "#ffffff"
+    assert _accent_foreground("#68a9ff") == "#10151d"
+    assert _accent_foreground("#b59cff") == "#10151d"
+
+
+def test_invalid_accent_uses_safe_foreground_fallback() -> None:
+    from weather_gui import _accent_foreground
+
+    assert _accent_foreground("not-a-colour") == "#ffffff"
