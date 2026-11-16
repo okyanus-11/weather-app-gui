@@ -1,6 +1,16 @@
 # Weather App GUI
 
-A clean desktop weather app built with Python's included Tkinter interface and OpenWeatherMap.
+A clean, responsive desktop weather app built with Tkinter and OpenWeatherMap.
+
+## Features
+
+- Search by city, optionally including a country code such as `London,GB`.
+- Switch between Celsius and Fahrenheit.
+- Graphite, Midnight and Light themes with a custom accent-colour picker.
+- Theme and accent preferences persist between launches.
+- Weather requests run in a background worker; the interface remains responsive
+  while the network is slow.
+- Stale results are ignored when a newer search has already started.
 
 ## Setup
 
@@ -16,6 +26,3 @@ Put your OpenWeatherMap key in `.env`, then launch the app:
 ```powershell
 python weather_gui.py
 ```
-
-Search by city, optionally including a country code such as `London,GB`, and switch between Celsius and Fahrenheit.
-
