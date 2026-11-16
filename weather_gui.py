@@ -38,6 +38,17 @@ THEMES: dict[str, dict[str, str]] = {
 }
 
 
+def _accent_foreground(hex_color: str) -> str:
+    """Choose readable text for an accent-filled button (WCAG luminance)."""
+    value = hex_color.lstrip("#")
+    if len(value) != 6 or any(ch not in "0123456789abcdefABCDEF" for ch in value):
+        return "#ffffff"
+    channels = [int(value[index:index + 2], 16) / 255 for index in (0, 2, 4)]
+    linear = [channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4 for channel in channels]
+    luminance = 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+    return "#10151d" if luminance > 0.179 else "#ffffff"
+
+
 class WeatherError(RuntimeError):
     """Raised when the weather service cannot fulfil a request."""
 
@@ -175,8 +186,9 @@ class WeatherApp(tk.Tk):
         self.style.map("TCombobox", fieldbackground=[("readonly", palette["surface_alt"])], foreground=[("readonly", palette["text"])])
         self.style.configure("TButton", background=palette["surface_alt"], foreground=palette["text"], bordercolor=palette["border"], padding=(12, 8))
         self.style.map("TButton", background=[("active", palette["border"])])
-        self.style.configure("Accent.TButton", background=palette["accent"], foreground="#10151d", font=("Segoe UI", 10, "bold"), padding=(15, 9))
-        self.style.map("Accent.TButton", background=[("active", palette["accent"])])
+        accent_foreground = _accent_foreground(palette["accent"])
+        self.style.configure("Accent.TButton", background=palette["accent"], foreground=accent_foreground, font=("Segoe UI", 10, "bold"), padding=(15, 9))
+        self.style.map("Accent.TButton", background=[("active", palette["accent"])], foreground=[("active", accent_foreground)])
         self.style.configure("TRadiobutton", background=palette["background"], foreground=palette["text"])
         self.style.map("TRadiobutton", background=[("active", palette["background"])], foreground=[("active", palette["text"])])
         self._save_preferences()
