@@ -1,18 +1,39 @@
-"""A desktop weather app powered by OpenWeatherMap and Tkinter."""
+"""Responsive Tkinter weather dashboard with async requests and saved themes."""
 
 from __future__ import annotations
 
+import json
 import os
+import threading
 import tkinter as tk
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from tkinter import messagebox, ttk
+from pathlib import Path
+from tkinter import colorchooser, messagebox, ttk
 from typing import Any
 
 import requests
 from dotenv import load_dotenv
 
-
 API_URL = "https://api.openweathermap.org/data/2.5/weather"
+CONFIG_PATH = Path.home() / ".weather-now.json"
+THEMES: dict[str, dict[str, str]] = {
+    "graphite": {
+        "background": "#10151d", "surface": "#171f2a", "surface_alt": "#202b38",
+        "border": "#2c3948", "text": "#edf3f8", "muted": "#9aabba",
+        "accent": "#78aaff",
+    },
+    "midnight": {
+        "background": "#11111b", "surface": "#1a1a2a", "surface_alt": "#25253a",
+        "border": "#38384f", "text": "#ececf7", "muted": "#a2a2bf",
+        "accent": "#b59cff",
+    },
+    "light": {
+        "background": "#f2f5f9", "surface": "#ffffff", "surface_alt": "#e9eef5",
+        "border": "#d7e0e9", "text": "#202b3a", "muted": "#66778a",
+        "accent": "#326fd1",
+    },
+}
 
 
 class WeatherError(RuntimeError):
@@ -21,7 +42,9 @@ class WeatherError(RuntimeError):
 
 def fetch_weather(city: str, api_key: str, units: str) -> dict[str, Any]:
     try:
-        response = requests.get(API_URL, params={"q": city, "appid": api_key, "units": units}, timeout=10)
+        response = requests.get(
+            API_URL, params={"q": city, "appid": api_key, "units": units}, timeout=10
+        )
         response.raise_for_status()
         return response.json()
     except requests.Timeout as error:
@@ -40,49 +63,130 @@ class WeatherApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("Weather Now")
-        self.geometry("520x540")
-        self.minsize(460, 500)
-        self.configure(bg="#101827")
+        self.geometry("600x620")
+        self.minsize(500, 540)
         self.units = tk.StringVar(value="metric")
         self.city = tk.StringVar(value="Istanbul")
         self.api_key = os.getenv("WEATHER_API_KEY", "")
+        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="weather")
+        self._request_id = 0
+        self._closing = False
+        self._preferences = self._load_preferences()
+        self.theme_name = self._preferences.get("theme", "graphite")
+        if self.theme_name not in THEMES:
+            self.theme_name = "graphite"
+        self.accent = self._preferences.get("accent", THEMES[self.theme_name]["accent"])
+        if not isinstance(self.accent, str) or len(self.accent) != 7 or not self.accent.startswith("#"):
+            self.accent = THEMES[self.theme_name]["accent"]
         self._build_ui()
+        self.apply_theme()
         self.bind("<Return>", lambda _event: self.show_weather())
+        self.protocol("WM_DELETE_WINDOW", self.close)
+
+    @staticmethod
+    def _load_preferences() -> dict[str, str]:
+        try:
+            data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    def _save_preferences(self) -> None:
+        payload = json.dumps({"theme": self.theme_name, "accent": self.accent}, indent=2)
+        temp = CONFIG_PATH.with_suffix(".tmp")
+        try:
+            temp.write_text(payload, encoding="utf-8")
+            temp.replace(CONFIG_PATH)
+        except OSError:
+            temp.unlink(missing_ok=True)
 
     def _build_ui(self) -> None:
-        style = ttk.Style(self)
-        style.theme_use("clam")
-        style.configure("Search.TButton", font=("Segoe UI", 11, "bold"), foreground="#101827", background="#79d5ff", padding=(15, 10))
-        style.map("Search.TButton", background=[("active", "#b8e9ff")])
+        self.style = ttk.Style(self)
+        self.style.theme_use("clam")
 
-        header = tk.Frame(self, bg="#101827", padx=32, pady=28)
+        header = ttk.Frame(self, padding=(30, 26, 30, 14))
         header.pack(fill="x")
-        tk.Label(header, text="Weather Now", font=("Segoe UI", 27, "bold"), fg="#f7fbff", bg="#101827").pack(anchor="w")
-        tk.Label(header, text="Current conditions, wherever you are headed.", font=("Segoe UI", 11), fg="#a8bad2", bg="#101827").pack(anchor="w", pady=(3, 0))
+        self.title_label = ttk.Label(header, text="Weather Now", style="Title.TLabel")
+        self.title_label.pack(anchor="w")
+        self.subtitle_label = ttk.Label(
+            header, text="Current conditions, wherever you're headed.", style="Muted.TLabel"
+        )
+        self.subtitle_label.pack(anchor="w", pady=(4, 0))
 
-        controls = tk.Frame(self, bg="#101827", padx=32)
+        controls = ttk.Frame(self, padding=(30, 8, 30, 0))
         controls.pack(fill="x")
-        entry = tk.Entry(controls, textvariable=self.city, font=("Segoe UI", 12), bg="#f7fbff", fg="#101827", relief="flat", insertbackground="#101827")
-        entry.pack(side="left", fill="x", expand=True, ipady=10)
-        ttk.Button(controls, text="Search", style="Search.TButton", command=self.show_weather).pack(side="left", padx=(10, 0))
+        self.entry = ttk.Entry(controls, textvariable=self.city, font=("Segoe UI", 12))
+        self.entry.pack(side="left", fill="x", expand=True, ipady=8)
+        self.search_button = ttk.Button(
+            controls, text="Search", style="Accent.TButton", command=self.show_weather
+        )
+        self.search_button.pack(side="left", padx=(10, 0), ipady=4)
 
-        switch = tk.Frame(self, bg="#101827", padx=32)
-        switch.pack(fill="x", pady=(12, 18))
+        options = ttk.Frame(self, padding=(30, 12, 30, 18))
+        options.pack(fill="x")
         for label, value in (("°C", "metric"), ("°F", "imperial")):
-            tk.Radiobutton(switch, text=label, variable=self.units, value=value, command=self.show_weather, font=("Segoe UI", 10), fg="#d9e7f7", bg="#101827", selectcolor="#24415c", activebackground="#101827", activeforeground="#ffffff").pack(side="left", padx=(0, 12))
+            ttk.Radiobutton(
+                options, text=label, variable=self.units, value=value,
+                command=self.show_weather,
+            ).pack(side="left", padx=(0, 12))
+        ttk.Label(options, text="Appearance", style="Muted.TLabel").pack(side="left", padx=(18, 6))
+        self.theme_select = ttk.Combobox(
+            options, state="readonly", width=11,
+            values=("Graphite", "Midnight", "Light"),
+        )
+        self.theme_select.set(self.theme_name.title())
+        self.theme_select.pack(side="left")
+        self.theme_select.bind("<<ComboboxSelected>>", self._theme_selected)
+        self.accent_button = ttk.Button(options, text="Accent colour", command=self.choose_accent)
+        self.accent_button.pack(side="left", padx=(8, 0))
 
-        self.card = tk.Frame(self, bg="#1b2a3d", padx=30, pady=26)
-        self.card.pack(fill="both", expand=True, padx=32, pady=(0, 32))
-        self.location_label = tk.Label(self.card, text="Search for a city", font=("Segoe UI", 21, "bold"), fg="#f7fbff", bg="#1b2a3d")
+        self.card = ttk.Frame(self, style="Card.TFrame", padding=30)
+        self.card.pack(fill="both", expand=True, padx=30, pady=(0, 30))
+        self.location_label = ttk.Label(self.card, text="Search for a city", style="Location.TLabel")
         self.location_label.pack(anchor="w")
-        self.condition_label = tk.Label(self.card, text="", font=("Segoe UI", 12), fg="#a8bad2", bg="#1b2a3d")
-        self.condition_label.pack(anchor="w", pady=(4, 20))
-        self.temperature_label = tk.Label(self.card, text="—", font=("Segoe UI", 54, "bold"), fg="#79d5ff", bg="#1b2a3d")
+        self.condition_label = ttk.Label(self.card, text="", style="Muted.TLabel")
+        self.condition_label.pack(anchor="w", pady=(5, 20))
+        self.temperature_label = ttk.Label(self.card, text="—", style="Temperature.TLabel")
         self.temperature_label.pack(anchor="w")
-        self.details_label = tk.Label(self.card, text="", justify="left", font=("Segoe UI", 12), fg="#e7f1fb", bg="#1b2a3d", anchor="w")
-        self.details_label.pack(anchor="w", pady=(18, 0))
-        self.updated_label = tk.Label(self.card, text="", font=("Segoe UI", 9), fg="#a8bad2", bg="#1b2a3d")
-        self.updated_label.pack(anchor="w", pady=(22, 0))
+        self.details_label = ttk.Label(self.card, text="", justify="left", style="Body.TLabel")
+        self.details_label.pack(anchor="w", pady=(20, 0))
+        self.updated_label = ttk.Label(self.card, text="", style="Muted.TLabel")
+        self.updated_label.pack(anchor="w", pady=(24, 0))
+        self.status_label = ttk.Label(self, text="Ready", style="Muted.TLabel", padding=(30, 0, 30, 12))
+        self.status_label.pack(fill="x")
+
+    def apply_theme(self) -> None:
+        palette = dict(THEMES[self.theme_name])
+        palette["accent"] = self.accent
+        self.configure(background=palette["background"])
+        self.style.configure("TFrame", background=palette["background"])
+        self.style.configure("Card.TFrame", background=palette["surface"], relief="flat")
+        self.style.configure("Title.TLabel", background=palette["background"], foreground=palette["text"], font=("Segoe UI", 26, "bold"))
+        self.style.configure("Muted.TLabel", background=palette["background"], foreground=palette["muted"], font=("Segoe UI", 10))
+        self.style.configure("Location.TLabel", background=palette["surface"], foreground=palette["text"], font=("Segoe UI", 20, "bold"))
+        self.style.configure("Temperature.TLabel", background=palette["surface"], foreground=palette["accent"], font=("Segoe UI", 52, "bold"))
+        self.style.configure("Body.TLabel", background=palette["surface"], foreground=palette["text"], font=("Segoe UI", 12))
+        self.style.configure("TEntry", fieldbackground=palette["surface_alt"], foreground=palette["text"], insertcolor=palette["text"], bordercolor=palette["border"], padding=10)
+        self.style.configure("TCombobox", fieldbackground=palette["surface_alt"], background=palette["surface_alt"], foreground=palette["text"], arrowcolor=palette["muted"], bordercolor=palette["border"], padding=6)
+        self.style.map("TCombobox", fieldbackground=[("readonly", palette["surface_alt"])], foreground=[("readonly", palette["text"])])
+        self.style.configure("TButton", background=palette["surface_alt"], foreground=palette["text"], bordercolor=palette["border"], padding=(12, 8))
+        self.style.map("TButton", background=[("active", palette["border"])])
+        self.style.configure("Accent.TButton", background=palette["accent"], foreground="#10151d", font=("Segoe UI", 10, "bold"), padding=(15, 9))
+        self.style.map("Accent.TButton", background=[("active", palette["accent"])])
+        self.style.configure("TRadiobutton", background=palette["background"], foreground=palette["text"])
+        self.style.map("TRadiobutton", background=[("active", palette["background"])], foreground=[("active", palette["text"])])
+        self._save_preferences()
+
+    def _theme_selected(self, _event=None) -> None:
+        self.theme_name = self.theme_select.get().lower()
+        self.accent = THEMES[self.theme_name]["accent"]
+        self.apply_theme()
+
+    def choose_accent(self) -> None:
+        selected = colorchooser.askcolor(color=self.accent, parent=self, title="Choose accent colour")[1]
+        if selected:
+            self.accent = selected
+            self.apply_theme()
 
     def show_weather(self) -> None:
         city = self.city.get().strip()
@@ -92,22 +196,61 @@ class WeatherApp(tk.Tk):
         if not self.api_key:
             messagebox.showerror("API key missing", "Add WEATHER_API_KEY to a .env file, then restart the app.", parent=self)
             return
-        try:
-            data = fetch_weather(city, self.api_key, self.units.get())
-        except WeatherError as error:
+
+        self._request_id += 1
+        request_id = self._request_id
+        units = self.units.get()
+        self.search_button.configure(state="disabled")
+        self.status_label.configure(text=f"Fetching weather for {city}…")
+        future = self._executor.submit(fetch_weather, city, self.api_key, units)
+
+        def completed(task) -> None:
+            try:
+                result = task.result()
+                error = None
+            except Exception as exc:
+                result, error = None, exc
+            if self._closing:
+                return
+            try:
+                self.after(0, lambda: self._finish_request(request_id, result, error, units))
+            except tk.TclError:
+                pass
+
+        future.add_done_callback(completed)
+
+    def _finish_request(self, request_id: int, data: dict[str, Any] | None, error: Exception | None, units: str) -> None:
+        if self._closing or request_id != self._request_id:
+            return
+        self.search_button.configure(state="normal")
+        if error is not None:
+            self.status_label.configure(text="Weather unavailable")
             messagebox.showerror("Weather unavailable", str(error), parent=self)
             return
+        assert data is not None
+        try:
+            temp_unit = "°F" if units == "imperial" else "°C"
+            wind_unit = "mph" if units == "imperial" else "m/s"
+            self.location_label.config(text=f"{data['name']}, {data['sys']['country']}")
+            self.condition_label.config(text=data["weather"][0]["description"].capitalize())
+            self.temperature_label.config(text=f"{data['main']['temp']:.1f}{temp_unit}")
+            self.details_label.config(text=(
+                f"Feels like  {data['main']['feels_like']:.1f}{temp_unit}\n"
+                f"Humidity    {data['main']['humidity']}%\n"
+                f"Wind        {data['wind']['speed']:.1f} {wind_unit}"
+            ))
+            observed = datetime.fromtimestamp(data["dt"]).strftime("%Y-%m-%d %H:%M")
+            self.updated_label.config(text=f"Updated {observed}")
+            self.status_label.configure(text="Weather updated")
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            self.status_label.configure(text="Unexpected weather response")
+            messagebox.showerror("Weather unavailable", f"Unexpected response from the weather service: {exc}", parent=self)
 
-        temp_unit = "°F" if self.units.get() == "imperial" else "°C"
-        wind_unit = "mph" if self.units.get() == "imperial" else "m/s"
-        self.location_label.config(text=f"{data['name']}, {data['sys']['country']}")
-        self.condition_label.config(text=data["weather"][0]["description"].capitalize())
-        self.temperature_label.config(text=f"{data['main']['temp']:.1f}{temp_unit}")
-        self.details_label.config(text=(f"Feels like  {data['main']['feels_like']:.1f}{temp_unit}\n"
-                                        f"Humidity    {data['main']['humidity']}%\n"
-                                        f"Wind        {data['wind']['speed']:.1f} {wind_unit}"))
-        observed = datetime.fromtimestamp(data["dt"]).strftime("%Y-%m-%d %H:%M")
-        self.updated_label.config(text=f"Updated {observed}")
+    def close(self) -> None:
+        self._closing = True
+        self._request_id += 1
+        self._executor.shutdown(wait=False, cancel_futures=True)
+        self.destroy()
 
 
 def main() -> None:
@@ -117,4 +260,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
