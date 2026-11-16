@@ -62,6 +62,8 @@ def fetch_weather(city: str, api_key: str, units: str) -> dict[str, Any]:
         return response.json()
     except requests.Timeout as error:
         raise WeatherError("The weather service took too long to respond. Please try again.") from error
+    except requests.exceptions.JSONDecodeError as error:
+        raise WeatherError("OpenWeatherMap returned invalid JSON. Please try again.") from error
     except requests.RequestException as error:
         if error.response is None:
             raise WeatherError("Could not reach OpenWeatherMap. Check your internet connection.") from error
