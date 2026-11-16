@@ -23,7 +23,7 @@ THEMES: dict[str, dict[str, str]] = {
     "graphite": {
         "background": "#10151d", "surface": "#171f2a", "surface_alt": "#202b38",
         "border": "#2c3948", "text": "#edf3f8", "muted": "#9aabba",
-        "accent": "#78aaff",
+        "accent": "#68a9ff",
     },
     "midnight": {
         "background": "#11111b", "surface": "#1a1a2a", "surface_alt": "#25253a",
