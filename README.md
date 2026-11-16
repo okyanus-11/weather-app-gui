@@ -26,3 +26,7 @@ Put your OpenWeatherMap key in `.env`, then launch the app:
 ```powershell
 python weather_gui.py
 ```
+
+## Installation
+
+For prerequisites, environment setup, configuration, and run/build commands, see the [installation guide](INSTALLATION.md).
