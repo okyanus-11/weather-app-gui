@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import queue
+import re
 import threading
 import tkinter as tk
 from concurrent.futures import ThreadPoolExecutor
@@ -71,15 +73,17 @@ class WeatherApp(tk.Tk):
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="weather")
         self._request_id = 0
         self._closing = False
+        self._results_queue = queue.SimpleQueue()
         self._preferences = self._load_preferences()
         self.theme_name = self._preferences.get("theme", "graphite")
         if self.theme_name not in THEMES:
             self.theme_name = "graphite"
         self.accent = self._preferences.get("accent", THEMES[self.theme_name]["accent"])
-        if not isinstance(self.accent, str) or len(self.accent) != 7 or not self.accent.startswith("#"):
+        if not isinstance(self.accent, str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", self.accent):
             self.accent = THEMES[self.theme_name]["accent"]
         self._build_ui()
         self.apply_theme()
+        self.after(40, self._poll_results)
         self.bind("<Return>", lambda _event: self.show_weather())
         self.protocol("WM_DELETE_WINDOW", self.close)
 
@@ -210,14 +214,21 @@ class WeatherApp(tk.Tk):
                 error = None
             except Exception as exc:
                 result, error = None, exc
-            if self._closing:
-                return
-            try:
-                self.after(0, lambda: self._finish_request(request_id, result, error, units))
-            except tk.TclError:
-                pass
+            if not self._closing:
+                self._results_queue.put((request_id, result, error, units))
 
         future.add_done_callback(completed)
+
+    def _poll_results(self) -> None:
+        if self._closing:
+            return
+        while True:
+            try:
+                request = self._results_queue.get_nowait()
+            except queue.Empty:
+                break
+            self._finish_request(*request)
+        self.after(40, self._poll_results)
 
     def _finish_request(self, request_id: int, data: dict[str, Any] | None, error: Exception | None, units: str) -> None:
         if self._closing or request_id != self._request_id:
