@@ -1,6 +1,9 @@
 from unittest.mock import Mock, patch
 
-from weather_gui import fetch_weather
+import pytest
+import requests
+
+from weather_gui import WeatherError, fetch_weather
 
 
 @patch("weather_gui.requests.get")
@@ -37,3 +40,15 @@ def test_invalid_accent_uses_safe_foreground_fallback() -> None:
     from weather_gui import _accent_foreground
 
     assert _accent_foreground("not-a-colour") == "#ffffff"
+
+
+
+@patch("weather_gui.requests.get")
+def test_invalid_json_response_has_clear_error(mock_get: Mock) -> None:
+    response = Mock()
+    response.json.side_effect = requests.exceptions.JSONDecodeError(
+        "invalid JSON", "{not-json", 0
+    )
+    mock_get.return_value = response
+    with pytest.raises(WeatherError, match="invalid JSON"):
+        fetch_weather("Istanbul", "key", "metric")
