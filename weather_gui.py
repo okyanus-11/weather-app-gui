@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import queue
 import re
@@ -53,17 +54,75 @@ class WeatherError(RuntimeError):
     """Raised when the weather service cannot fulfil a request."""
 
 
+def _is_finite_number(value: Any) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
+def _validate_weather_data(data: Any) -> dict[str, Any]:
+    invalid_response = "OpenWeatherMap returned an invalid weather response. Please try again."
+    if not isinstance(data, dict):
+        raise WeatherError(invalid_response)
+
+    system = data.get("sys")
+    conditions = data.get("weather")
+    measurements = data.get("main")
+    wind = data.get("wind")
+    if (
+        not isinstance(data.get("name"), str)
+        or not data["name"].strip()
+        or not isinstance(system, dict)
+        or not isinstance(system.get("country"), str)
+        or not system["country"].strip()
+        or not isinstance(conditions, list)
+        or not conditions
+        or not isinstance(conditions[0], dict)
+        or not isinstance(conditions[0].get("description"), str)
+        or not conditions[0]["description"].strip()
+        or not isinstance(measurements, dict)
+        or not isinstance(wind, dict)
+    ):
+        raise WeatherError(invalid_response)
+
+    humidity = measurements.get("humidity")
+    wind_speed = wind.get("speed")
+    if (
+        not _is_finite_number(measurements.get("temp"))
+        or not _is_finite_number(measurements.get("feels_like"))
+        or not _is_finite_number(humidity)
+        or not 0 <= humidity <= 100
+        or not _is_finite_number(wind_speed)
+        or wind_speed < 0
+        or not _is_finite_number(data.get("dt"))
+    ):
+        raise WeatherError(invalid_response)
+
+    try:
+        datetime.fromtimestamp(data["dt"])
+    except (OverflowError, OSError, ValueError) as error:
+        raise WeatherError(invalid_response) from error
+    return data
+
+
 def fetch_weather(city: str, api_key: str, units: str) -> dict[str, Any]:
     try:
         response = requests.get(
             API_URL, params={"q": city, "appid": api_key, "units": units}, timeout=10
         )
         response.raise_for_status()
-        return response.json()
+        try:
+            data = response.json()
+        except ValueError as error:
+            raise WeatherError(
+                "OpenWeatherMap returned an invalid weather response. Please try again."
+            ) from error
+        return _validate_weather_data(data)
     except requests.Timeout as error:
         raise WeatherError("The weather service took too long to respond. Please try again.") from error
-    except requests.exceptions.JSONDecodeError as error:
-        raise WeatherError("OpenWeatherMap returned invalid JSON. Please try again.") from error
     except requests.RequestException as error:
         if error.response is None:
             raise WeatherError("Could not reach OpenWeatherMap. Check your internet connection.") from error
@@ -72,7 +131,6 @@ def fetch_weather(city: str, api_key: str, units: str) -> dict[str, Any]:
         if error.response.status_code == 404:
             raise WeatherError("City not found. Try a city and country code, such as London,GB.") from error
         raise WeatherError(f"OpenWeatherMap returned an error ({error.response.status_code}).") from error
-
 
 class WeatherApp(tk.Tk):
     def __init__(self) -> None:
