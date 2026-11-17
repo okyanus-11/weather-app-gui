@@ -50,7 +50,7 @@ def test_invalid_json_response_has_clear_error(mock_get: Mock) -> None:
         "invalid JSON", "{not-json", 0
     )
     mock_get.return_value = response
-    with pytest.raises(WeatherError, match="invalid JSON"):
+    with pytest.raises(WeatherError, match="invalid weather response"):
         fetch_weather("Istanbul", "key", "metric")
 
 
